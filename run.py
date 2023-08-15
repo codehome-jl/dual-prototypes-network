@@ -68,10 +68,10 @@ class Learner:
     def parse_command_line(self):
         parser = argparse.ArgumentParser()
 
-        parser.add_argument("--dataset", type=str, default="/data3/jiangzhen/jl/data/somethingV2/S_new_frames/", help="Path to dataset")
+        parser.add_argument("--dataset", type=str, default="address of dataset", help="Path to dataset")
         parser.add_argument("--learning_rate", "-lr", type=float, default=0.001, help="Learning rate.")
         parser.add_argument("--tasks_per_batch", type=int, default=16, help="Number of tasks between parameter optimizations.")
-        parser.add_argument("--checkpoint_dir", "-c", default="../data/result/lunwen3/ssv2_5_5", help="Directory to save checkpoint to.")
+        parser.add_argument("--checkpoint_dir", "-c", default="checkpoint_dir", help="Directory to save checkpoint to.")
         parser.add_argument("--test_model_name", "-m", default="checkpoint_best_val.pt", help="Path to model to load and test.")
         parser.add_argument("--training_iterations", "-i", type=int, default=25010, help="Number of meta-training iterations.")
         parser.add_argument("--resume_from_checkpoint", "-r", dest="resume_from_checkpoint", default=False, action="store_true", help="Restart from latest checkpoint.")
@@ -94,7 +94,7 @@ class Learner:
         parser.add_argument('--temp_set', nargs='+', type=int, help='cardinalities e.g. 2,3 is pairs and triples', default=[2,3])
         parser.add_argument("--num_gpus", type=int, default=4, help="Number of GPUs to split the ResNet over")
         parser.add_argument('--sch', nargs='+', type=int, help='iters to drop learning rate', default=[1000000])
-        parser.add_argument("--method", choices=["trx", "pro", "tsn", "pal","mutil"], default="mutil", help="few-shot method to use")
+        parser.add_argument("--method", choices=["trx","mutil"], default="mutil", help="few-shot method to use")
         parser.add_argument("--pretrained_backbone", "-pt", type=str, default=None, help="pretrained backbone path, used by PAL")
         parser.add_argument("--val_on_test", default=False, action="store_true", help="Danger: Validate on the test set, not the validation set. Use for debugging or checking overfitting on test set. Not good practice to use when developing, hyperparameter tuning or training models.")
 
@@ -140,7 +140,6 @@ class Learner:
 
             # print training stats
             if (iteration + 1) % self.args.print_freq == 0:
-                print("============train===============")
                 print_and_log(self.logfile,'Task [{}/{}], Train Loss: {:.7f}, Train Accuracy: {:.7f}'
                               .format(iteration + 1, total_iterations, torch.Tensor(losses).mean().item(),
                                       torch.Tensor(train_accuracies).mean().item()))
@@ -155,7 +154,6 @@ class Learner:
             if ((iteration + 1) % self.args.val_iters == 0) and (iteration + 1) != total_iterations:
                 accuracy_dict = self.evaluate("test")
                 print(accuracy_dict)
-                print("===print===test========")
                 iter_acc = accuracy_dict[self.args.dataset]["accuracy"]
                 val_accuraies.append(iter_acc)
 
@@ -200,7 +198,6 @@ class Learner:
         model_dict = self.model(task_dict['support_set'], task_dict['support_labels'], task_dict['target_set'])
         target_logits = model_dict['logits']
 
-        #task_loss = self.model.loss(task_dict, model_dict) / self.args.tasks_per_batch
         task_loss = self.loss(target_logits, target_labels, self.device) / self.args.tasks_per_batch
         task_accuracy = self.accuracy_fn(target_logits, target_labels)
 
@@ -236,15 +233,6 @@ class Learner:
 
                 logits = self.softmax(target_logits.squeeze(dim=0)).cpu().numpy()
                 label = target_labels.cpu().numpy()
-
-                # label = torch.tensor(label)
-                # logits = torch.tensor(logits)
-                #
-                # r = dict(zip(label, logits))
-                #
-                # res = sorted(r.items(), key=lambda x: x[0])
-                #
-                # save_dict_by_numpy('/data3/jiangzhen/jl/data/result/lunwen2/pro',res)
 
 
                 accuracy = self.accuracy_fn(target_logits, target_labels)
