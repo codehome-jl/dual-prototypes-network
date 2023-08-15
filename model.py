@@ -285,8 +285,6 @@ class Mutildimension_attention(nn.Module):
             class_k = torch.index_select(support_set, 0, extract_class_indices(support_labels, c))  # [5,56,1535]
             sample.append(class_k)
             class_v = torch.index_select(support_set, 0, extract_class_indices(support_labels, c))  # [5,56,1535]
-            # print("=============class_k==================" + str(class_k.size()))
-
             class_n_k = torch.chunk(class_k, dim=0, chunks=self.n_dim)
             class_n_v = torch.chunk(class_v, dim=0, chunks=self.n_dim)
 
@@ -304,7 +302,6 @@ class Mutildimension_attention(nn.Module):
                     else:
                         q_set = torch.narrow(class_k,dim=0,start=0,length=self.args.shot-1)
 
-                #print("+++++++++++q_set++++++++++++++++"+str(q_set))
                 k_ch = k_ch.squeeze(0)
                 k_ch = self.norm_k(self.W_K(k_ch))
                 #sup.append(k_ch)
@@ -317,8 +314,6 @@ class Mutildimension_attention(nn.Module):
                 all_prototype1 += prototype
 
 
-
-
             # cross-atention2
             for idx, k_chunk in enumerate(class_n_k):
                 k_chunk = k_chunk.squeeze(0)
@@ -327,9 +322,7 @@ class Mutildimension_attention(nn.Module):
                 class_scores = torch.matmul(queries_qs, k_chunk.transpose(-2, -1)) / math.sqrt(self.args.trans_linear_in_dim * self.temporal_set_size)  # [25, 56, 56]
                 class_scores = self.class_softmax(class_scores)
                 query_prototype = torch.matmul(class_scores, v_chunk)
-                #print("====================query_prototype================="+str(query_prototype.size()))
                 all_prototype2 +=query_prototype# [25，56, 1535]
-                #print("++++++++++++++++all_prototype12+++++++++++++++++" + str(all_prototype2.size()))
 
             sim_result1 = cosine_similarity(all_prototype1.squeeze(dim = 0), queries_vs)  # [25,56]
             sim_result1 = torch.mean(sim_result1, dim=1) * 1000
@@ -342,19 +335,6 @@ class Mutildimension_attention(nn.Module):
 
             c_idx = c.long()
             all_distances_tensor[:, c_idx] = sim_result
-
-            # sup = np.array(sup)
-            # sup = torch.tensor(sup)
-            #
-            # feat = sup.reshape(25, -1).cpu().detach().numpy()
-            #
-            # fig = plt.figure(figsize=(10, 10))
-            #
-            # plotlabels(visual(feat), support_labels.cpu().detach().numpy(), '(b)')
-            # self.num = self.num + 1
-            # plt.savefig("./pict/2222_{}.jpg".format(self.num))
-
-
 
         return_dict = {'logits': all_distances_tensor}
 
@@ -384,80 +364,5 @@ class CNN_Mutildimension(CNN_FSHead):
         return_dict = {'logits': split_first_dim_linear(sample_logits, [self.NUM_SAMPLES, target_features.shape[0]])}
         return return_dict
 
-
-
-class Ave_Pro(nn.Module):
-    def __init__(self,args,temporal_set_size = 3):
-        super(Ave_Pro, self).__init__()
-
-        self.args = args
-
-        max_len = int(self.args.seq_len * 1.5)
-        self.NUM_SAMPLES = 1
-        self.pe = PositionalEncoding(self.args.trans_linear_in_dim, self.args.trans_dropout, max_len=max_len)
-
-        self.frame_idxs = [i for i in range(self.args.seq_len)]
-        self.frame_combinations = combinations(self.frame_idxs, temporal_set_size)
-        self.tuples = [torch.tensor(comb).cuda() for comb in self.frame_combinations]
-        self.tuples_len = len(self.tuples)
-
-
-    def forward(self, support_set, support_labels, queries):
-
-        unique_labels = torch.unique(support_labels)
-
-        n_support = support_set.shape[0]
-        n_queries = queries.shape[0]
-
-        support_features = self.pe(support_set)
-        query_features = self.pe(queries)
-
-        s = [torch.index_select(support_features, -2, p).reshape(n_support, -1) for p in self.tuples]
-        q = [torch.index_select(query_features, -2, p).reshape(n_queries, -1) for p in self.tuples]
-        #
-        support_features = torch.stack(s, dim=-2)
-        query_features = torch.stack(q, dim=-2)
-
-        all_simily_tensor = torch.zeros(n_queries, self.args.way).cuda()
-
-        for label_idx,c in enumerate(unique_labels):
-            class_p = torch.index_select(support_features, 0, extract_class_indices(support_labels, c))#[5,56,1536]
-            class_prototypes = torch.mean(class_p, dim=0)#[56,1536]
-            #class_prototypes = torch.mean(class_p,dim=1)#[5,512]
-
-            #target_features = torch.mean(target_features,dim=1)#[25,1536]
-
-            sim_result = cosine_similarity(class_prototypes,query_features)#[25,56]
-            sim_result = torch.mean(sim_result,dim=1)*1000
-
-
-            c_idx = c.long()
-            all_simily_tensor[:,c_idx] = sim_result
-            #all_simily = torch.stack(all_simily_tensor)
-            #print("++++++++++all_simily+++++++++++++" + str(all_simily.size()))
-
-
-        return_dict = {'logits': all_simily_tensor}
-        return  return_dict
-
-class CNN_Pro(CNN_FSHead):
-
-    def __init__(self, args):
-        super(CNN_Pro, self).__init__(args)
-
-        self.NUM_SAMPLES = 1
-        self.model = nn.ModuleList([Ave_Pro(args, s) for s in args.temp_set])
-
-    def forward(self, context_images, context_labels, target_images):
-
-        context_features,target_features = self.get_feats(context_images,target_images)
-
-        all_logits = [t(context_features, context_labels, target_features)['logits'] for t in self.model]
-        all_logits = torch.stack(all_logits, dim=-1)
-        sample_logits = all_logits
-        sample_logits = torch.mean(sample_logits, dim=[-1])
-
-        return_dict = {'logits': split_first_dim_linear(sample_logits, [self.NUM_SAMPLES, target_features.shape[0]])}
-        return return_dict
 
 
